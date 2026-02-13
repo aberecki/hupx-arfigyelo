@@ -1,0 +1,31 @@
+name: Napi Arfigyelo
+
+on:
+  schedule:
+    # Minden nap 12:15 UTC-kor fut (ez télen 13:15, nyáron 14:15 magyar idő szerint)
+    # Ekkorra már biztosan kint vannak a holnapi árak.
+    - cron: '15 12 * * *'
+  workflow_dispatch: # Ez engedi, hogy kézzel is teszteld
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kód letöltése
+        uses: actions/checkout@v3
+
+      - name: Python telepítése
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Csomagok telepítése
+        run: pip install -r requirements.txt
+
+      - name: Program futtatása
+        env:
+          ENTSOE_KEY: ${{ secrets.ENTSOE_KEY }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_TARGET: ${{ secrets.EMAIL_TARGET }}
+        run: python main.py
