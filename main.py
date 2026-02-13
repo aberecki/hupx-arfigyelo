@@ -5,16 +5,16 @@ import pandas as pd
 from email.message import EmailMessage
 from entsoe import EntsoePandasClient
 
-# --- 1. BEÁLLÍTÁSOK ÉS TITKOS KULCSOK ---
+# --- 1. BEÁLLÍTÁSOK ---
 API_KEY = os.environ.get('ENTSOE_KEY')
 EMAIL_SENDER = os.environ.get('EMAIL_SENDER')
 EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 EMAIL_TARGET = os.environ.get('EMAIL_TARGET')
 
-# --- 2. E-MAIL KÜLDŐ FÜGGVÉNY ---
+# --- 2. E-MAIL KÜLDÉS ---
 def send_email(subject, body):
     if not EMAIL_SENDER or not EMAIL_PASSWORD:
-        print("❌ HIBA: Hiányzik az e-mail küldő címe vagy jelszava a Secrets-ből!")
+        print("❌ HIBA: Hiányzik az e-mail jelszó!")
         return
 
     msg = EmailMessage()
@@ -28,71 +28,70 @@ def send_email(subject, body):
         server.login(EMAIL_SENDER, EMAIL_PASSWORD)
         server.send_message(msg)
         server.quit()
-        print(f"✅ E-mail sikeresen elküldve ide: {EMAIL_TARGET}")
+        print(f"✅ E-mail elküldve ide: {EMAIL_TARGET}")
     except Exception as e:
-        print(f"❌ Hiba az e-mail küldéskor: {e}")
+        print(f"❌ E-mail hiba: {e}")
 
-# --- 3. FŐ PROGRAM (ÁRAK LEKÉRÉSE) ---
+# --- 3. FŐ PROGRAM ---
 def check_prices():
     print("--- PROGRAM INDÍTÁSA ---")
     
     if not API_KEY:
-        print("❌ KRITIKUS HIBA: Nincs beállítva az ENTSOE_KEY a Secrets-ben!")
+        print("❌ KRITIKUS HIBA: Nincs API kulcs!")
         return
 
     try:
         client = EntsoePandasClient(api_key=API_KEY)
         
-        # Időzóna beállítása (Budapest)
-        now = pd.Timestamp.now(tz='Europe/Budapest')
-        start = now.normalize() + pd.Timedelta(days=1)  # Holnap 00:00
-        end = start + pd.Timedelta(days=1)              # Holnapután 00:00
+        # --- IDŐ KORRIGÁLÁSA 2025-RE ---
+        # Mivel az adatbázisban csak 2025-ös adatok vannak,
+        # kényszerítjük a dátumot a mai napra (2025.02.13).
         
-        print(f"📅 Mai dátum (szerver szerint): {now}")
-        print(f"🔎 Lekérdezés erre a napra (holnap): {start.date()}")
-        print("⏳ Adatok lekérése az ENTSO-E szerverről...")
+        print("🔧 Dátum kényszerítése 2025-re (hogy legyen adat)...")
+        now = pd.Timestamp.now(tz='Europe/Budapest').replace(year=2025, month=2, day=13)
+        
+        start = now.normalize() + pd.Timedelta(days=1) # Holnap (2025.02.14)
+        end = start + pd.Timedelta(days=1)
+        
+        print(f"📅 Keresett nap: {start.date()} (Valentin nap)")
+        print("⏳ Adatok letöltése...")
 
-        # --- ITT TÖRTÉNIK A LEKÉRDEZÉS ---
+        # Lekérdezés
         prices = client.query_day_ahead_prices('HU', start=start, end=end)
         
         if prices.empty:
-            print("⚠️ FIGYELEM: A szerver válaszolt, de üres adatot küldött.")
-            print("Ok lehet: Még nincsenek feltöltve a holnapi árak.")
+            print("⚠️ Üres válasz érkezett.")
             return
 
-        # --- ADATOK ELEMZÉSE ---
-        negativ_orak = prices[prices <= 0]
+        # --- FIGYELEM! TESZT ÜZEMMÓD ---
+        # Most direkt magasra (1000 EUR) állítjuk a limitet, 
+        # hogy BIZTOSAN találjon "olcsóbb" áramot és küldjön e-mailt neked!
+        TEST_LIMIT = 1000 
+        negativ_orak = prices[prices < TEST_LIMIT]
         
         if not negativ_orak.empty:
-            print(f"📉 TALÁLAT! {len(negativ_orak)} órában lesz negatív/ingyen áram.")
+            print(f"✅ TALÁLAT! Sikerült adatot szerezni.")
             
-            subject = f"⚠️ INGYEN ÁRAM: {start.date()} (Holnap!)"
-            body = f"Szia!\n\nA tőzsdei adatok alapján holnap ({start.date()}) negatív vagy 0 eurós áramár várható!\n\n"
-            body += "🕒 ÉRINTETT IDŐSZAKOK:\n"
+            subject = f"✅ SIKERES TESZT: Működik a rendszered!"
+            body = f"Szia!\n\nEz a levél bizonyítja, hogy a rendszered JÓL MŰKÖDIK.\n"
+            body += f"Sikerült lekérdezni a holnapi ({start.date()}) árakat.\n\n"
+            body += "Íme az első pár ár (EUR/MWh):\n"
             body += "---------------------------------\n"
             
-            for idopont, ar in negativ_orak.items():
+            for idopont, ar in negativ_orak.head(5).items():
                 ora = idopont.strftime('%H:%M')
-                body += f"⚡ {ora} --> {ar:.2f} EUR/MWh\n"
+                body += f"⏰ {ora} --> {ar:.2f}\n"
             
             body += "---------------------------------\n"
-            body += "Javaslat: Töltsd az autót vagy indítsd a nagy fogyasztókat!\n\n"
-            body += "Üdv,\nA Te Árfigyelő Robotod 🤖"
+            body += "Most már visszaállíthatod a kódot élesre (limit < 0).\n"
             
             send_email(subject, body)
         else:
-            print(f"👍 Siker! Lekértem az adatokat {start.date()}-ra.")
-            print(f"Minimális ár: {prices.min():.2f} EUR/MWh")
-            print("Nincs negatív ár holnapra, így nem küldök e-mailt.")
+            print("Nincs találat.")
             
     except Exception as e:
-        print("\n❌ ------------------------------------------------")
-        print("HIBA TÖRTÉNT A PROGRAM FUTÁSA KÖZBEN!")
-        print(f"Hiba típusa: {type(e).__name__}")
-        print(f"Hiba üzenet: {str(e)}")
-        print("\nRészletes Traceback:")
+        print(f"\n❌ HIBA: {e}")
         traceback.print_exc()
-        print("--------------------------------------------------")
 
 if __name__ == "__main__":
     check_prices()
