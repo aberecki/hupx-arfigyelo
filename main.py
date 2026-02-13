@@ -1,16 +1,23 @@
 import os
 import smtplib
+import traceback
 import pandas as pd
 from email.message import EmailMessage
 from entsoe import EntsoePandasClient
 
-# --- 1. TITKOS ADATOK BEOLVASÁSA ---
-API_KEY = os.environ['ENTSOE_KEY']
-EMAIL_SENDER = os.environ['EMAIL_SENDER']
-EMAIL_PASSWORD = os.environ['EMAIL_PASSWORD']
-EMAIL_TARGET = os.environ['EMAIL_TARGET']
+# --- 1. BEÁLLÍTÁSOK ÉS TITKOS KULCSOK ---
+# Ezeket a GitHub Secrets-ből olvassa ki
+API_KEY = os.environ.get('ENTSOE_KEY')
+EMAIL_SENDER = os.environ.get('EMAIL_SENDER')
+EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')
+EMAIL_TARGET = os.environ.get('EMAIL_TARGET')
 
+# --- 2. E-MAIL KÜLDŐ FÜGGVÉNY ---
 def send_email(subject, body):
+    if not EMAIL_SENDER or not EMAIL_PASSWORD:
+        print("❌ HIBA: Hiányzik az e-mail küldő címe vagy jelszava a Secrets-ből!")
+        return
+
     msg = EmailMessage()
     msg.set_content(body)
     msg['Subject'] = subject
@@ -18,56 +25,41 @@ def send_email(subject, body):
     msg['To'] = EMAIL_TARGET
 
     try:
-        # Csatlakozás a Gmail szerverhez
+        # Csatlakozás a Gmail szerverhez (SSL biztonságos kapcsolaton)
         server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
         server.login(EMAIL_SENDER, EMAIL_PASSWORD)
         server.send_message(msg)
         server.quit()
-        print("✅ E-mail sikeresen elküldve!")
+        print(f"✅ E-mail sikeresen elküldve ide: {EMAIL_TARGET}")
     except Exception as e:
         print(f"❌ Hiba az e-mail küldéskor: {e}")
 
+# --- 3. FŐ PROGRAM (ÁRAK LEKÉRÉSE) ---
 def check_prices():
-    # Csatlakozás az ENTSO-E adatbázishoz
-    client = EntsoePandasClient(api_key=API_KEY)
-
-    # Időzóna beállítása (Budapest)
-    start = pd.Timestamp.now(tz='Europe/Budapest').normalize() + pd.Timedelta(days=1)
-    end = start + pd.Timedelta(days=1)
-
-    print(f"🔎 Árak lekérdezése erre a napra: {start.date()}")
+    print("--- PROGRAM INDÍTÁSA ---")
+    
+    # Ellenőrizzük, hogy megvan-e az API kulcs
+    if not API_KEY:
+        print("❌ KRITIKUS HIBA: Nincs beállítva az ENTSOE_KEY a Secrets-ben!")
+        return
 
     try:
-        # Magyar (HU) árak lekérése holnapra
+        client = EntsoePandasClient(api_key=API_KEY)
+        
+        # Időzóna beállítása (Budapest)
+        # A 'normalize' éjfélre állítja az órát
+        now = pd.Timestamp.now(tz='Europe/Budapest')
+        start = now.normalize() + pd.Timedelta(days=1)  # Holnap 00:00
+        end = start + pd.Timedelta(days=1)              # Holnapután 00:00
+        
+        print(f"📅 Mai dátum (szerver szerint): {now}")
+        print(f"🔎 Lekérdezés erre a napra (holnap): {start.date()}")
+        print("⏳ Adatok lekérése az ENTSO-E szerverről...")
+
+        # --- ITT TÖRTÉNIK A LEKÉRDEZÉS ---
         prices = client.query_day_ahead_prices('HU', start=start, end=end)
-
-        # Keressük a 0 vagy negatív árakat
-        negativ_orak = prices[prices <= 0]
-
-        if not negativ_orak.empty:
-            print("📉 Negatív árakat találtam! E-mail küldése...")
-
-            # E-mail összeállítása
-            subject = f"⚠️ INGYEN ÁRAM: {start.date()} (Holnap!)"
-
-            body = f"Szia!\n\nA tőzsdei adatok alapján holnap ({start.date()}) 0 vagy negatív áramár várható!\n\n"
-            body += "🕒 IDŐSZAKOK ÉS ÁRAK:\n"
-            body += "---------------------------------\n"
-
-            for idopont, ar in negativ_orak.items():
-                ora = idopont.strftime('%H:%M')
-                body += f"⚡ {ora} --> {ar:.2f} EUR/MWh\n"
-
-            body += "---------------------------------\n"
-            body += "TIPP: Töltsd az autót vagy indítsd a mosógépet ezekben az órákban!\n\n"
-            body += "Üdv,\nA Te Árfigyelő Robotod 🤖"
-
-            send_email(subject, body)
-        else:
-            print("👍 Nincs negatív ár holnapra. Nem küldök levelet.")
-
-    except Exception as e:
-        print(f"❌ Hiba történt a lekérdezésben: {e}")
-
-if __name__ == "__main__":
-    check_prices()
+        
+        # Ha üres választ kapunk (de nem hibaüzenetet)
+        if prices.empty:
+            print("⚠️ FIGYELEM: A szerver válaszolt, de üres adatot küldött.")
+            print("Ok lehet: Még nincsenek feltöltve a holnapi árak (próbáld később, pl. 13:00 után).")
