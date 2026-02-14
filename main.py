@@ -12,7 +12,7 @@ def clean_secret(value):
     if not value: return ""
     return value.strip().replace('\xa0', '')
 
-# Kulcsok beolvasása
+# Kulcsok beolvasása a GitHub Secrets-ből
 API_KEY = clean_secret(os.environ.get('ENTSOE_KEY'))
 EMAIL_SENDER = clean_secret(os.environ.get('EMAIL_SENDER'))
 EMAIL_PASSWORD = clean_secret(os.environ.get('EMAIL_PASSWORD'))
@@ -26,7 +26,7 @@ PRICE_LIMIT = 50.0
 # --- 2. ÉRTESÍTÉSI FUNKCIÓK ---
 
 def send_pushover(title, message):
-    """Azonnali push értesítés küldése a telefonra."""
+    """Azonnali push értesítés küldése a telefonra Pushoveren keresztül."""
     if not PO_USER or not PO_TOKEN:
         print("⚠️ Pushover kulcsok hiányoznak.")
         return
@@ -46,6 +46,7 @@ def send_pushover(title, message):
         print(f"❌ Pushover hiba: {e}")
 
 def send_email(subject, body):
+    """E-mail küldése Gmail SMTP szerveren keresztül."""
     if not EMAIL_SENDER or not EMAIL_PASSWORD:
         return
     msg = EmailMessage()
@@ -74,14 +75,14 @@ def check_prices():
         client = EntsoePandasClient(api_key=API_KEY)
         
         # --- DÁTUM BEÁLLÍTÁSA ---
-        # A reggel 6-os futtatáskor a MAI napot nézzük
+        # A reggel 6-os futtatáskor a MAI napot nézzük (00:00-24:00)
         now = pd.Timestamp.now(tz='Europe/Budapest')
         start = now.normalize() 
         end = start + pd.Timedelta(days=1)
         
         print(f"🔎 Vizsgált nap (MA): {start.date()}")
 
-        # Lekérdezés
+        # Lekérdezés az ENTSO-E szerverről
         prices = client.query_day_ahead_prices('HU', start=start, end=end)
         
         if prices.empty:
@@ -103,7 +104,7 @@ def check_prices():
             for timestamp, price in cheap_hours.items():
                 time_str = timestamp.strftime('%H:%M')
                 email_body += f"⚡ {time_str} --> {price/1000:.4f} EUR/kWh ({price:.1f} €/MWh)\n"
-            email_body += "-------------------\nÜdv, a Robotod"
+            email_body += "-------------------\nÜdv, a Robotod 🤖"
             
             send_pushover(title, msg_brief)
             send_email(f"{title} {start.date()}", email_body)
