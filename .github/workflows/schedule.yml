@@ -1,15 +1,17 @@
-name: Napi Arfigyelo
+name: HUPX Arfigyelo
 
 on:
   schedule:
-    # Minden nap 12:15 UTC-kor fut (ez télen 13:15, nyáron 14:15 magyar idő szerint)
-    # Ekkorra már biztosan kint vannak a holnapi árak.
-    - cron: '15 12 * * *'
-  workflow_dispatch: # Ez engedi, hogy kézzel is teszteld
+    - cron: '0 5 * * *'  # Minden reggel 6:00 (Budapest téli idő)
+  workflow_dispatch:      # Kézi indítás lehetősége
+
+permissions:
+  contents: write         # Írási jog a fájlokhoz
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
+    
     steps:
       - name: Kód letöltése
         uses: actions/checkout@v3
@@ -20,7 +22,8 @@ jobs:
           python-version: '3.9'
 
       - name: Csomagok telepítése
-        run: pip install -r requirements.txt
+        run: |
+          pip install pandas requests entsoe-py
 
       - name: Program futtatása
         env:
@@ -28,4 +31,14 @@ jobs:
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_TARGET: ${{ secrets.EMAIL_TARGET }}
+          PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
+          PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
         run: python main.py
+
+      - name: Adatok frissítése (Commit & Push)
+        run: |
+          git config --global user.name "GitHub Action Robot"
+          git config --global user.email "action@github.com"
+          git add prices.json
+          # Csak akkor commitoljon, ha van változás
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Friss tőzsdei árak [skip ci]" && git push)
