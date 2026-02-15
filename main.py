@@ -28,9 +28,9 @@ def save_to_json(prices, start_date):
         data_list = []
         for timestamp, price in prices.items():
             data_list.append({
-                "time": timestamp.isoformat(), # Pl: 2026-02-15T11:00:00+01:00
-                "price_eur": round(price, 2),  # Ár EUR/MWh
-                "price_kwh": round(price / 1000, 4) # Ár EUR/kWh
+                "time": timestamp.isoformat(), 
+                "price_eur": round(price, 2),  
+                "price_kwh": round(price / 1000, 4) 
             })
             
         # JSON fájl írása
@@ -41,7 +41,7 @@ def save_to_json(prices, start_date):
                 "data": data_list
             }, f, indent=4)
             
-        print("✅ SIKER: prices.json fájl legenerálva!")
+        print("✅ SIKER: prices.json fájl legenerálva (Teszt adat)!")
     except Exception as e:
         print(f"❌ Hiba a JSON mentésekor: {e}")
 
@@ -72,16 +72,22 @@ def send_email(subject, body):
 
 # --- 4. FŐ PROGRAM ---
 def check_prices():
-    print("--- INDÍTÁS (PWA JSON GENERÁTOR + ÉRTESÍTŐ) ---")
+    print("--- INDÍTÁS (FIX DÁTUMOS TESZT MÓD) ---")
     if not API_KEY: return
 
     try:
         client = EntsoePandasClient(api_key=API_KEY)
-        now = pd.Timestamp.now(tz='Europe/Budapest')
-        start = now.normalize() 
+        
+        # --- ITT A VÁLTOZÁS: FIX DÁTUM ---
+        # Eredeti (Real-time): now = pd.Timestamp.now(tz='Europe/Budapest')
+        
+        # Teszt (Fix 2025-ös dátum):
+        fixed_date = pd.Timestamp("2025-02-15", tz='Europe/Budapest')
+        
+        start = fixed_date.normalize()
         end = start + pd.Timedelta(days=1)
         
-        print(f"🔎 Vizsgált nap: {start.date()}")
+        print(f"🔎 Vizsgált nap (TESZT): {start.date()}")
 
         prices = client.query_day_ahead_prices('HU', start=start, end=end)
         
@@ -92,21 +98,13 @@ def check_prices():
         # 1. LÉPÉS: Mentsük el az adatokat a PWA-nak!
         save_to_json(prices, start.date())
 
-        # 2. LÉPÉS: Elemzés és Értesítés (Régi logika)
+        # 2. LÉPÉS: Elemzés (Csak a logba írjuk ki, ne küldjön e-mailt a múltból)
         cheap_hours = prices[prices < PRICE_LIMIT]
-        
-        if not cheap_hours.empty:
-            title = "🟢 MAI OLCSÓ ÁRAM!"
-            msg = f"Ma ({start.date()}) {len(cheap_hours)} órán át lesz 0,05€ alatt!"
-            body = f"Részletek:\n" + "\n".join([f"{t.strftime('%H:%M')} -> {p/1000:.4f} €/kWh" for t, p in cheap_hours.items()])
-            send_pushover(title, msg)
-            send_email(f"{title} {start.date()}", body)
-        else:
-            print("Nincs olcsó áram, de az adatokat frissítettem.")
+        print(f"Elemzés: {len(cheap_hours)} olcsó óra található ezen a napon.")
             
     except Exception as e:
         if "NoMatchingDataError" in str(type(e)):
-            print("ℹ️ Még nincs adat az ENTSO-E-n.")
+            print("ℹ️ Nincs adat erre a napra az ENTSO-E-n.")
         else:
             traceback.print_exc()
 
