@@ -39,6 +39,12 @@ jobs:
         run: |
           git config --global user.name "GitHub Action Robot"
           git config --global user.email "action@github.com"
-          git add prices.json
-          # Csak akkor commitoljon, ha van változás
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Friss tőzsdei árak [skip ci]" && git push)
+          
+          # Csak akkor próbáljon menteni, ha létezik a fájl!
+          if [ -f prices.json ]; then
+            git add prices.json
+            git diff --quiet && git diff --staged --quiet || (git commit -m "Friss tőzsdei árak [skip ci]" && git push)
+            echo "✅ Sikeres mentés."
+          else
+            echo "⚠️ Nem jött létre prices.json (valószínűleg nincs még tőzsdei adat), a mentés kimarad."
+          fi
