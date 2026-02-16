@@ -19,34 +19,32 @@ EMAIL_TARGET = clean_secret(os.environ.get('EMAIL_TARGET'))
 PO_USER = clean_secret(os.environ.get('PUSHOVER_USER_KEY'))
 PO_TOKEN = clean_secret(os.environ.get('PUSHOVER_API_TOKEN'))
 
-# Értesítési limit: 0.1 EUR/kWh (100 EUR/MWh)
+# Határérték: 0.1 EUR/kWh (Ez alatt már nem éri meg eladni)
 PRICE_LIMIT = 100.0 
 
 def format_intervals(cheap_data):
-    """Összefüggő idősávok generálása a negyedórás adatokból"""
-    if cheap_data.empty:
-        return ""
-    
+    if cheap_data.empty: return ""
     intervals = []
     start_time = cheap_data.index[0]
-    
     for i in range(1, len(cheap_data)):
-        # Megnézzük a különbséget az aktuális és az előző időpont között
         diff = cheap_data.index[i] - cheap_data.index[i-1]
-        
-        # Ha több mint 15 perc telt el, lezárjuk az előző sávot
         if diff > pd.Timedelta(minutes=15):
             end_time = cheap_data.index[i-1] + pd.Timedelta(minutes=15)
             intervals.append(f"• {start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')}")
             start_time = cheap_data.index[i]
-            
-    # Az utolsó sáv lezárása
     end_time = cheap_data.index[-1] + pd.Timedelta(minutes=15)
     intervals.append(f"• {start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')}")
-    
     return "\n".join(intervals)
 
 def send_alert(subject, body):
+    # Pushover küldés
+    if PO_USER and PO_TOKEN:
+        try:
+            requests.post("https://api.pushover.net/1/messages.json", data={
+                "token": PO_TOKEN, "user": PO_USER, "title": subject, "message": body, "priority": 1
+            })
+        except: print("Pushover hiba")
+    # E-mail küldés
     if EMAIL_SENDER and EMAIL_PASSWORD:
         try:
             msg = EmailMessage()
@@ -57,64 +55,50 @@ def send_alert(subject, body):
             with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
                 server.login(EMAIL_SENDER, EMAIL_PASSWORD)
                 server.send_message(msg)
-            print("📧 E-mail elküldve.")
         except: print("E-mail hiba")
 
-    if PO_USER and PO_TOKEN:
-        try:
-            requests.post("https://api.pushover.net/1/messages.json", data={
-                "token": PO_TOKEN, "user": PO_USER, "title": subject, "message": body, "priority": 1
-            })
-            print("📱 Pushover elküldve.")
-        except: print("Pushover hiba")
-
 def check_prices():
-    print(f"--- INDÍTÁS: OKOS ÉRTESÍTÉSEK (Limit: {PRICE_LIMIT/1000} €/kWh) ---")
+    print(f"--- INDÍTÁS: PROSUMER OPTIMALIZÁLÁS (Limit: {PRICE_LIMIT/1000} €/kWh) ---")
     if not API_KEY: return
-
     try:
         client = EntsoePandasClient(api_key=API_KEY)
         now = pd.Timestamp.now(tz='Europe/Budapest')
         target_day = (now + pd.Timedelta(days=1)).normalize()
         
         prices = client.query_day_ahead_prices('HU', start=target_day, end=target_day + pd.Timedelta(days=1))
-        
-        if prices.empty:
-            print("Nincs adat holnapra.")
-            return
+        if prices.empty: return
 
         target_prices = prices[prices.index.normalize() == target_day]
         
-        # JSON mentés a weboldalnak
+        # JSON mentés
         data_list = [{"time": t.isoformat(), "price_kwh": round(p/1000, 4)} for t, p in target_prices.items()]
         with open('prices.json', 'w') as f:
             json.dump({"day": str(target_day.date()), "data": data_list}, f)
 
-        # Riasztási logika
+        # Alacsony ár figyelése (amikor nem éri meg eladni)
         cheap_intervals = target_prices[target_prices < PRICE_LIMIT]
         
         if not cheap_intervals.empty:
             time_list = format_intervals(cheap_intervals)
             min_price = target_prices.min() / 1000
             
-            subject = f"⚡ KEDVEZŐ ENERGIAÁRAK: {target_day.date()}"
+            subject = f"⚠️ ALACSONY ÁTVÉTELI ÁR: {target_day.date()}"
             
             body = (
-                f"Szia!\n\n"
-                f"Holnap kedvező áron lesz elérhető az áram a tőzsdén. "
-                f"A legalacsonyabb ár: {min_price:.4f} €/kWh.\n\n"
-                f"📍 Alacsony tarifás időszakok:\n{time_list}\n\n"
-                f"💡 OKOS TIPPEK ERRE AZ IDŐSZAKRA:\n"
-                f"🚗 Töltsd fel az elektromos autódat!\n"
-                f"🧺 Indítsd el a mosó- vagy mosogatógépet!\n"
-                f"❄️ Időzítsd a klímát az előhűtésre/fűtésre!\n"
-                f"🔋 Ha van otthoni akkumulátorod, most érdemes tölteni!\n\n"
-                f"Részletes grafikon: https://aberecki.github.io/hupx-arfigyelo/"
+                f"Kedves Termelő!\n\n"
+                f"Holnap napközben a piaci átvételi ár nagyon alacsony lesz ({min_price:.4f} €/kWh alá esik). "
+                f"Ebben az időszakban nem kifizetődő a hálózatba táplálni!\n\n"
+                f"📍 JAVASOLT ÖNFOGYASZTÁSI IDŐSZAKOK:\n{time_list}\n\n"
+                f"🛠️ MIT TEGYÉL, HOGY NE VESZÍTS PÉNZT?\n"
+                f"🚗 Most töltsd az elektromos autót a saját termelésedből!\n"
+                f"🧺 Erre az időre időzítsd a nagyfogyasztókat (mosás, szárítás)!\n"
+                f"🌡️ Most hűtsd/fűtsd le a lakást a klímával!\n"
+                f"🔋 Ha van akkumulátorod, most töltsd fel, hogy az esti drága órákban legyen mihez nyúlni!\n\n"
+                f"Grafikon: https://aberecki.github.io/hupx-arfigyelo/"
             )
             
             send_alert(subject, body)
-        else:
-            print("Holnap nincs a limit alatti ár.")
+            print("📧 Prosumer riasztás elküldve.")
             
     except Exception as e:
         traceback.print_exc()
