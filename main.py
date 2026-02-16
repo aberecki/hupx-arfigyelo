@@ -7,7 +7,6 @@ import pandas as pd
 from email.message import EmailMessage
 from entsoe import EntsoePandasClient
 
-# VERZIÓ: 3.0 - MÁSNAPI ÉLES ÜZEMMÓD (2026)
 # --- 1. BEÁLLÍTÁSOK ---
 def clean_secret(value):
     if not value: return ""
@@ -20,7 +19,9 @@ EMAIL_TARGET = clean_secret(os.environ.get('EMAIL_TARGET'))
 PO_USER = clean_secret(os.environ.get('PUSHOVER_USER_KEY'))
 PO_TOKEN = clean_secret(os.environ.get('PUSHOVER_API_TOKEN'))
 
-PRICE_LIMIT = 50.0 
+# ÚJ ÁRLIMIT: 100 EUR/MWh = 0.1 EUR/kWh
+# Ha az ár ez alatt van, küldünk értesítést.
+PRICE_LIMIT = 100.0 
 
 # --- 2. JSON MENTÉS ---
 def save_to_json(prices, start_date):
@@ -39,42 +40,49 @@ def save_to_json(prices, start_date):
                 "day": str(start_date),
                 "data": data_list
             }, f, indent=4)
-        print(f"✅ SIKER: prices.json frissítve ({start_date})")
+        print(f"✅ Adatok mentve: {start_date}")
     except Exception as e:
         print(f"❌ JSON hiba: {e}")
 
-# --- 3. FŐ PROGRAM ---
+# --- 3. ÉRTESÍTÉSI FUNKCIÓK ---
+def send_pushover(title, message):
+    if not PO_USER or not PO_TOKEN: return
+    try:
+        requests.post("https://api.pushover.net/1/messages.json", data={
+            "token": PO_TOKEN, "user": PO_USER, "title": title, "message": message, "priority": 1
+        })
+    except: pass
+
+def send_email(subject, body):
+    if not EMAIL_SENDER or not EMAIL_PASSWORD: return
+    msg = EmailMessage()
+    msg.set_content(body)
+    msg['Subject'] = subject
+    msg['From'] = EMAIL_SENDER
+    msg['To'] = EMAIL_TARGET
+    try:
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+    except: pass
+
+# --- 4. FŐ PROGRAM ---
 def check_prices():
-    # EBBŐL A FELIRATBÓL FOGOD LÁTNI, HOGY EZ MÁR AZ ÚJ KÓD:
-    print("--- !!!INDÍTÁS: MÁSNAPI ÁRAK ÉLES LEKÉRDEZÉSE (VERZIÓ 3.0)!!! ---")
-    
-    if not API_KEY: 
-        print("Hiba: Nincs API kulcs!")
-        return
+    print(f"--- INDÍTÁS: ADATLEKÉRDEZÉS (Limit: {PRICE_LIMIT/1000} EUR/kWh) ---")
+    if not API_KEY: return
 
     try:
         client = EntsoePandasClient(api_key=API_KEY)
-        
-        # DÁTUM: Célzottan a HOLNAPI nap
         now = pd.Timestamp.now(tz='Europe/Budapest')
         target_day = (now + pd.Timedelta(days=1)).normalize()
-        
         start = target_day
         end = start + pd.Timedelta(days=1)
         
-        print(f"🔎 Lekérdezés a holnapi napra: {start.date()}")
-
         prices = client.query_day_ahead_prices('HU', start=start, end=end)
         
         if prices.empty:
-            print(f"⚠️ Nincs adat holnapra ({start.date()}).")
+            print("⚠️ Nincs adat holnapra.")
             return
 
-        target_prices = prices[prices.index.normalize() == target_day]
-        save_to_json(target_prices, target_day.date())
-            
-    except Exception as e:
-        traceback.print_exc()
-
-if __name__ == "__main__":
-    check_prices()
+        target_prices =
