@@ -19,26 +19,34 @@ EMAIL_TARGET = clean_secret(os.environ.get('EMAIL_TARGET'))
 PO_USER = clean_secret(os.environ.get('PUSHOVER_USER_KEY'))
 PO_TOKEN = clean_secret(os.environ.get('PUSHOVER_API_TOKEN'))
 
-# ÚJ LIMIT: 100 EUR/MWh = 0.1 EUR/kWh
+# Értesítési limit: 0.1 EUR/kWh (100 EUR/MWh)
 PRICE_LIMIT = 100.0 
 
-def save_to_json(prices, start_date):
-    try:
-        data_list = []
-        for timestamp, price in prices.items():
-            data_list.append({
-                "time": timestamp.isoformat(), 
-                "price_eur": round(price, 2),  
-                "price_kwh": round(price / 1000, 4) 
-            })
-        with open('prices.json', 'w', encoding='utf-8') as f:
-            json.dump({"updated": pd.Timestamp.now().isoformat(), "day": str(start_date), "data": data_list}, f, indent=4)
-        print(f"✅ Mentve: {start_date}")
-    except Exception as e:
-        print(f"❌ JSON hiba: {e}")
+def format_intervals(cheap_data):
+    """Összefüggő idősávok generálása a negyedórás adatokból"""
+    if cheap_data.empty:
+        return ""
+    
+    intervals = []
+    start_time = cheap_data.index[0]
+    
+    for i in range(1, len(cheap_data)):
+        # Megnézzük a különbséget az aktuális és az előző időpont között
+        diff = cheap_data.index[i] - cheap_data.index[i-1]
+        
+        # Ha több mint 15 perc telt el, lezárjuk az előző sávot
+        if diff > pd.Timedelta(minutes=15):
+            end_time = cheap_data.index[i-1] + pd.Timedelta(minutes=15)
+            intervals.append(f"• {start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')}")
+            start_time = cheap_data.index[i]
+            
+    # Az utolsó sáv lezárása
+    end_time = cheap_data.index[-1] + pd.Timedelta(minutes=15)
+    intervals.append(f"• {start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')}")
+    
+    return "\n".join(intervals)
 
 def send_alert(subject, body):
-    # E-mail küldés
     if EMAIL_SENDER and EMAIL_PASSWORD:
         try:
             msg = EmailMessage()
@@ -49,38 +57,67 @@ def send_alert(subject, body):
             with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
                 server.login(EMAIL_SENDER, EMAIL_PASSWORD)
                 server.send_message(msg)
+            print("📧 E-mail elküldve.")
         except: print("E-mail hiba")
-    # Pushover küldés
+
     if PO_USER and PO_TOKEN:
-        try: requests.post("https://api.pushover.net/1/messages.json", data={"token": PO_TOKEN, "user": PO_USER, "title": subject, "message": body})
+        try:
+            requests.post("https://api.pushover.net/1/messages.json", data={
+                "token": PO_TOKEN, "user": PO_USER, "title": subject, "message": body, "priority": 1
+            })
+            print("📱 Pushover elküldve.")
         except: print("Pushover hiba")
 
 def check_prices():
-    print(f"--- INDÍTÁS: NEGYEDÓRÁS MONITORING (Limit: {PRICE_LIMIT/1000} EUR/kWh) ---")
+    print(f"--- INDÍTÁS: OKOS ÉRTESÍTÉSEK (Limit: {PRICE_LIMIT/1000} €/kWh) ---")
     if not API_KEY: return
+
     try:
         client = EntsoePandasClient(api_key=API_KEY)
         now = pd.Timestamp.now(tz='Europe/Budapest')
         target_day = (now + pd.Timedelta(days=1)).normalize()
         
-        # Lekérdezés (ENTSO-E automatikusan adja a negyedórásat, ha elérhető)
         prices = client.query_day_ahead_prices('HU', start=target_day, end=target_day + pd.Timedelta(days=1))
         
-        if prices.empty: return
+        if prices.empty:
+            print("Nincs adat holnapra.")
+            return
 
-        # SZINTAKTIKAI JAVÍTÁS ITT:
         target_prices = prices[prices.index.normalize() == target_day]
         
-        save_to_json(target_prices, target_day.date())
+        # JSON mentés a weboldalnak
+        data_list = [{"time": t.isoformat(), "price_kwh": round(p/1000, 4)} for t, p in target_prices.items()]
+        with open('prices.json', 'w') as f:
+            json.dump({"day": str(target_day.date()), "data": data_list}, f)
 
-        # Értesítő, ha 0.1 EUR/kWh alá megy
+        # Riasztási logika
         cheap_intervals = target_prices[target_prices < PRICE_LIMIT]
+        
         if not cheap_intervals.empty:
-            count = len(cheap_intervals)
-            msg = f"Holnap {count} időszakban 0.1 €/kWh alatt lesz az ár!"
-            send_alert(f"⚡ Áram Ár Riasztás: {target_day.date()}", msg)
+            time_list = format_intervals(cheap_intervals)
+            min_price = target_prices.min() / 1000
             
-    except Exception as e: traceback.print_exc()
+            subject = f"⚡ KEDVEZŐ ENERGIAÁRAK: {target_day.date()}"
+            
+            body = (
+                f"Szia!\n\n"
+                f"Holnap kedvező áron lesz elérhető az áram a tőzsdén. "
+                f"A legalacsonyabb ár: {min_price:.4f} €/kWh.\n\n"
+                f"📍 Alacsony tarifás időszakok:\n{time_list}\n\n"
+                f"💡 OKOS TIPPEK ERRE AZ IDŐSZAKRA:\n"
+                f"🚗 Töltsd fel az elektromos autódat!\n"
+                f"🧺 Indítsd el a mosó- vagy mosogatógépet!\n"
+                f"❄️ Időzítsd a klímát az előhűtésre/fűtésre!\n"
+                f"🔋 Ha van otthoni akkumulátorod, most érdemes tölteni!\n\n"
+                f"Részletes grafikon: https://aberecki.github.io/hupx-arfigyelo/"
+            )
+            
+            send_alert(subject, body)
+        else:
+            print("Holnap nincs a limit alatti ár.")
+            
+    except Exception as e:
+        traceback.print_exc()
 
 if __name__ == "__main__":
     check_prices()
