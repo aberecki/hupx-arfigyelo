@@ -90,14 +90,14 @@ def check_prices():
             
             body = (
                 f"Kedves Termelő!\n\n"
-                f"Holnap a HMKE termelési időszakban (08:00-18:00) az átvételi ár {min_price:.4f} €/kWh alá esik. "
+                f"Holnap a termelési időszakban 08:00-18:00 között várhatóan az átvételi ár {min_price:.4f} €/kWh alá esik. "
                 f"Érdemes maximalizálni az önfogyasztást!\n\n"
-                f"📍 JAVASOLT AKTÍV IDŐSZAKOK (TERMÉLÉS ALATT):\n{time_list}\n\n"
-                f"🛠️ JAVASLATOK:\n"
+                f"JAVASOLT AKTÍV IDŐSZAKOK (TERMELÉS ALATT):\n{time_list}\n\n"
+                f"JAVASLATOK:\n"
                 f"🚗 Töltsd az autót!\n"
                 f"🧺 Nagyfogyasztók (mosás, szárítás) időzítése!\n"
-                f"🌡️ Hűtés/fűtés ráindítása a termelési csúcsban!\n\n"
-                f"Grafikon: https://aberecki.github.io/hupx-arfigyelo/"
+                f"🌡️ Hűtés/fűtés indítása a termelési csúcsban!\n\n"
+                f"Átvételi árak: https://aberecki.github.io/hupx-arfigyelo/"
             )
             
             send_alert(subject, body)
