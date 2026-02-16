@@ -19,7 +19,7 @@ EMAIL_TARGET = clean_secret(os.environ.get('EMAIL_TARGET'))
 PO_USER = clean_secret(os.environ.get('PUSHOVER_USER_KEY'))
 PO_TOKEN = clean_secret(os.environ.get('PUSHOVER_API_TOKEN'))
 
-# Határérték: 0.1 EUR/kWh (Ez alatt már nem éri meg eladni)
+# Határérték: 0.1 EUR/kWh (100 EUR/MWh)
 PRICE_LIMIT = 100.0 
 
 def format_intervals(cheap_data):
@@ -37,14 +37,12 @@ def format_intervals(cheap_data):
     return "\n".join(intervals)
 
 def send_alert(subject, body):
-    # Pushover küldés
     if PO_USER and PO_TOKEN:
         try:
             requests.post("https://api.pushover.net/1/messages.json", data={
                 "token": PO_TOKEN, "user": PO_USER, "title": subject, "message": body, "priority": 1
             })
         except: print("Pushover hiba")
-    # E-mail küldés
     if EMAIL_SENDER and EMAIL_PASSWORD:
         try:
             msg = EmailMessage()
@@ -58,7 +56,7 @@ def send_alert(subject, body):
         except: print("E-mail hiba")
 
 def check_prices():
-    print(f"--- INDÍTÁS: PROSUMER OPTIMALIZÁLÁS (Limit: {PRICE_LIMIT/1000} €/kWh) ---")
+    print(f"--- INDÍTÁS: HMKE TERMELÉSI ABLAK MONITORING (08-18h) ---")
     if not API_KEY: return
     try:
         client = EntsoePandasClient(api_key=API_KEY)
@@ -70,35 +68,42 @@ def check_prices():
 
         target_prices = prices[prices.index.normalize() == target_day]
         
-        # JSON mentés
+        # 1. JSON MENTÉS (A weboldal továbbra is mindent mutat)
         data_list = [{"time": t.isoformat(), "price_kwh": round(p/1000, 4)} for t, p in target_prices.items()]
         with open('prices.json', 'w') as f:
             json.dump({"day": str(target_day.date()), "data": data_list}, f)
 
-        # Alacsony ár figyelése (amikor nem éri meg eladni)
-        cheap_intervals = target_prices[target_prices < PRICE_LIMIT]
+        # 2. SZŰRÉS A TERMELÉSI ABLAKRA (08:00 - 18:00)
+        # Csak azokat az órákat tartjuk meg az értesítéshez, amik 8 és 18 közé esnek
+        production_window = target_prices[
+            (target_prices.index.hour >= 8) & (target_prices.index.hour < 18)
+        ]
+
+        # Alacsony ár figyelése CSAK a termelési ablakban
+        cheap_intervals = production_window[production_window < PRICE_LIMIT]
         
         if not cheap_intervals.empty:
             time_list = format_intervals(cheap_intervals)
-            min_price = target_prices.min() / 1000
+            min_price = cheap_intervals.min() / 1000
             
-            subject = f"⚠️ ALACSONY ÁTVÉTELI ÁR: {target_day.date()}"
+            subject = f"⚠️ HMKE RIASZTÁS: {target_day.date()}"
             
             body = (
                 f"Kedves Termelő!\n\n"
-                f"Holnap napközben a piaci átvételi ár nagyon alacsony lesz ({min_price:.4f} €/kWh alá esik). "
-                f"Ebben az időszakban nem kifizetődő a hálózatba táplálni!\n\n"
-                f"📍 JAVASOLT ÖNFOGYASZTÁSI IDŐSZAKOK:\n{time_list}\n\n"
-                f"🛠️ MIT TEGYÉL, HOGY NE VESZÍTS PÉNZT?\n"
-                f"🚗 Most töltsd az elektromos autót a saját termelésedből!\n"
-                f"🧺 Erre az időre időzítsd a nagyfogyasztókat (mosás, szárítás)!\n"
-                f"🌡️ Most hűtsd/fűtsd le a lakást a klímával!\n"
-                f"🔋 Ha van akkumulátorod, most töltsd fel, hogy az esti drága órákban legyen mihez nyúlni!\n\n"
+                f"Holnap a HMKE termelési időszakban (08:00-18:00) az átvételi ár {min_price:.4f} €/kWh alá esik. "
+                f"Érdemes maximalizálni az önfogyasztást!\n\n"
+                f"📍 JAVASOLT AKTÍV IDŐSZAKOK (TERMÉLÉS ALATT):\n{time_list}\n\n"
+                f"🛠️ JAVASLATOK:\n"
+                f"🚗 Töltsd az autót!\n"
+                f"🧺 Nagyfogyasztók (mosás, szárítás) időzítése!\n"
+                f"🌡️ Hűtés/fűtés ráindítása a termelési csúcsban!\n\n"
                 f"Grafikon: https://aberecki.github.io/hupx-arfigyelo/"
             )
             
             send_alert(subject, body)
-            print("📧 Prosumer riasztás elküldve.")
+            print(f"📧 Értesítés elküldve a termelési ablakra szűrve.")
+        else:
+            print("Holnap a termelési ablakban nincs kritikus ár.")
             
     except Exception as e:
         traceback.print_exc()
