@@ -46,7 +46,7 @@ def save_to_json(prices, start_date):
 # --- 3. FŐ PROGRAM ---
 def check_prices():
     # EBBŐL A FELIRATBÓL FOGOD LÁTNI, HOGY EZ MÁR AZ ÚJ KÓD:
-    print("--- INDÍTÁS: MÁSNAPI ÁRAK ÉLES LEKÉRDEZÉSE (VERZIÓ 3.0) ---")
+    print("--- !!!INDÍTÁS: MÁSNAPI ÁRAK ÉLES LEKÉRDEZÉSE (VERZIÓ 3.0)!!! ---")
     
     if not API_KEY: 
         print("Hiba: Nincs API kulcs!")
