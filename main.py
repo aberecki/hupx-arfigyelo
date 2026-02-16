@@ -19,10 +19,9 @@ EMAIL_TARGET = clean_secret(os.environ.get('EMAIL_TARGET'))
 PO_USER = clean_secret(os.environ.get('PUSHOVER_USER_KEY'))
 PO_TOKEN = clean_secret(os.environ.get('PUSHOVER_API_TOKEN'))
 
-# Árlimit: 50 EUR/MWh felett már nem küldünk "olcsó" riasztást
 PRICE_LIMIT = 50.0 
 
-# --- 2. JSON MENTÉS (WEBOLDALHOZ) ---
+# --- 2. JSON MENTÉS ---
 def save_to_json(prices, start_date):
     try:
         data_list = []
@@ -39,7 +38,7 @@ def save_to_json(prices, start_date):
                 "day": str(start_date),
                 "data": data_list
             }, f, indent=4)
-        print(f"✅ SIKER: prices.json frissítve a valós dátummal: {start_date}")
+        print(f"✅ Mentve a másnapi ({start_date}) adat.")
     except Exception as e:
         print(f"❌ JSON hiba: {e}")
 
@@ -68,46 +67,44 @@ def send_email(subject, body):
 
 # --- 4. FŐ PROGRAM ---
 def check_prices():
-    print("--- INDÍTÁS: ÉLES ADATLEKÉRDEZÉS (2026) ---")
+    print("--- INDÍTÁS: MÁSNAPI ÁRAK FIGYELÉSE (15:00-as futás) ---")
     if not API_KEY: return
 
     try:
         client = EntsoePandasClient(api_key=API_KEY)
         
-        # --- MOST MÁR A VALÓS IDŐT HASZNÁLJUK ---
+        # DÁTUM: Célzottan a HOLNAPI nap (00:00-tól 24:00-ig)
         now = pd.Timestamp.now(tz='Europe/Budapest')
-        start = now.normalize()
-        end = start + pd.Timedelta(days=2) # Ma + holnap
+        target_day = (now + pd.Timedelta(days=1)).normalize()
         
-        print(f"🔎 Lekérdezés indítása: {start.date()} -tól")
+        start = target_day
+        end = start + pd.Timedelta(days=1)
+        
+        print(f"🔎 Lekérdezés a holnapi napra: {start.date()}")
 
         prices = client.query_day_ahead_prices('HU', start=start, end=end)
         
         if prices.empty:
-            print("⚠️ Nincs adat az ENTSO-E rendszerében.")
+            print(f"⚠️ Nincs adat holnapra ({start.date()}).")
             return
 
-        # Kiválasztjuk a legfrissebb elérhető napot (ami már remélhetőleg a holnap)
-        last_ts = prices.index[-1]
-        target_day = last_ts.normalize()
-        
-        # Csak a célzott nap adatait mentjük
+        # Csak a holnapi napot mentjük
         target_prices = prices[prices.index.normalize() == target_day]
-
-        # 1. Lépés: Mentés a weboldalnak
         save_to_json(target_prices, target_day.date())
 
-        # 2. Lépés: Riasztás, ha van olcsó óra
+        # Értesítés küldése
         cheap_hours = target_prices[target_prices < PRICE_LIMIT]
         if not cheap_hours.empty:
-            send_pushover(f"⚡ Olcsó áram: {target_day.date()}", f"{len(cheap_hours)} órán át kedvező az ár!")
-            send_email(f"Áram ár riasztás: {target_day.date()}", "Nézd meg az appot a részletekért!")
+            min_p = target_prices.min() / 1000
+            subject = f"⚡ MÁSNAPI RIASZTÁS: {target_day.date()}"
+            body = f"Holnap {len(cheap_hours)} órán át lesz olcsó az áram!\nMinimum: {min_p:.4f} €/kWh"
+            
+            send_pushover(subject, body)
+            send_email(subject, body)
+            print("📧 Értesítés elküldve.")
             
     except Exception as e:
-        if "NoMatchingDataError" in str(type(e)):
-            print("ℹ️ Az ENTSO-E még nem adta ki a friss adatokat.")
-        else:
-            traceback.print_exc()
+        traceback.print_exc()
 
 if __name__ == "__main__":
     check_prices()
