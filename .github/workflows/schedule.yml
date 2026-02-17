@@ -1,50 +1,35 @@
-name: HUPX Arfigyelo
-
+name: run-script
 on:
   schedule:
-    - cron: '0 5 * * *'  # Minden reggel 6:00 (Budapest téli idő)
-  workflow_dispatch:      # Kézi indítás lehetősége
-
-permissions:
-  contents: write         # Írási jog a fájlokhoz
+    # 14:00 UTC = 15:00 magyar idő (téli időszámításnál)
+    - cron: '0 14 * * *'
+  workflow_dispatch:
 
 jobs:
-  run-script:
+  build:
     runs-on: ubuntu-latest
-    
     steps:
       - name: Kód letöltése
         uses: actions/checkout@v3
-
       - name: Python telepítése
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-
       - name: Csomagok telepítése
-        run: |
-          pip install pandas requests entsoe-py
-
+        run: pip install pandas entsoe-py requests
       - name: Program futtatása
         env:
           ENTSOE_KEY: ${{ secrets.ENTSOE_KEY }}
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_TARGET: ${{ secrets.EMAIL_TARGET }}
-          PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
-          PUSHOVER_API_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
+          PO_USER: ${{ secrets.PUSHOVER_USER_KEY }}
+          PO_TOKEN: ${{ secrets.PUSHOVER_API_TOKEN }}
         run: python main.py
-
       - name: Adatok frissítése (Commit & Push)
         run: |
-          git config --global user.name "GitHub Action Robot"
-          git config --global user.email "action@github.com"
-          
-          # Csak akkor próbáljon menteni, ha létezik a fájl!
-          if [ -f prices.json ]; then
-            git add prices.json
-            git diff --quiet && git diff --staged --quiet || (git commit -m "Friss tőzsdei árak [skip ci]" && git push)
-            echo "✅ Sikeres mentés."
-          else
-            echo "⚠️ Nem jött létre prices.json (valószínűleg nincs még tőzsdei adat), a mentés kimarad."
-          fi
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add prices.json
+          git commit -m "Automata árfrissítés" || exit 0
+          git push
