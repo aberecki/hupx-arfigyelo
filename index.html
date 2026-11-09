@@ -84,12 +84,12 @@
 
                     // Színezési logika
                     if (item.price_kwh < 0) {
-                        priceClass = "negative";
-                        priceText += " ⚡ INGYEN";
+                        priceClass = "megatív átvétételi ár";
+                        priceText += "0 alatti átvételi ár";
                     } else if (item.price_kwh < 0.01) { // 10 Ft alatt (kb)
-                        priceClass = "cheap";
+                        priceClass = "alacsony átvételi ár";
                     } else if (item.price_kwh > 0.1) { // 40 Ft felett (kb)
-                        priceClass = "expensive";
+                        priceClass = "MVM vételezési árat meghaladó";
                     }
 
                     // HTML elem létrehozása
